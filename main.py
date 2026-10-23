@@ -8,6 +8,7 @@ from tarla_analiz import TarlaParselMotoru
 from veritabani import veritabani_baslat, analiz_ve_aksiyon_kaydet, DB_YOLU
 from uydu_servisi import SentinelUyduServisi
 from piksel_analiz import gercek_banttan_ndvi_cikar
+from mqtt_vana import vana_emri_gonder
 
 veritabani_baslat()
 uydu_servisi = SentinelUyduServisi()
@@ -44,7 +45,7 @@ def tarla_analiz_ve_kaydet(istek: TarlaIstek):
         b04_url = uydu_raporu.get("kirmizi_bant_url")
         b08_url = uydu_raporu.get("nir_bant_url")
 
-        # 2. Gerçek COG Piksel Taraması (Sulama simülasyonu aktif değilse doğrudan uydudan oku)
+        # 2. Gerçek COG Piksel Taraması
         if not istek.sulama_sonrasi_mi and b04_url and b08_url:
             piksel_sonuc = gercek_banttan_ndvi_cikar(b04_url, b08_url, grid_boyutu=istek.grid_boyutu)
             if piksel_sonuc.get("basarili"):
@@ -77,6 +78,13 @@ def tarla_analiz_ve_kaydet(istek: TarlaIstek):
         # 3. Veritabanı ve Karar Motoru
         sulama_emirleri = analiz_ve_aksiyon_kaydet(rapor)
 
+        # 4. Sahadaki Fiziksel Vanalara Otonom MQTT Emri Fırlat
+        for emir in sulama_emirleri:
+            sektor_adi = emir.get("sektor_id", "BILINMEYEN_SEKTOR")
+            su_miktari = emir.get("onerilen_su_ton", 0.0)
+            # Kritik sektöre vanayı AÇ emri gönderiliyor
+            vana_emri_gonder(sektor_id=sektor_adi, durum="ACIK", su_miktari_ton=su_miktari)
+
         return {
             "basarili": True,
             "analiz_raporu": rapor,
@@ -106,12 +114,23 @@ def vana_emri_guncelle(emir_id: int, istek: EmirDurumGuncelleme):
     try:
         conn = sqlite3.connect(DB_YOLU)
         cursor = conn.cursor()
+        
+        # Sektör bilgisini çekip fiziksel kapatma emri gönderelim
+        cursor.execute("SELECT sektor_id FROM sulama_emirleri WHERE id = ?", (emir_id,))
+        kayit = cursor.fetchone()
+        
         cursor.execute(
             "UPDATE sulama_emirleri SET durum = ? WHERE id = ?",
             (istek.durum, emir_id)
         )
         conn.commit()
         conn.close()
+
+        if kayit:
+            sektor_adi = kayit[0]
+            # Fiziksel vanaya KAPALI emri iletiliyor
+            vana_emri_gonder(sektor_id=sektor_adi, durum="KAPALI", su_miktari_ton=0.0)
+
         return {"basarili": True, "emir_id": emir_id, "yeni_durum": istek.durum}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Durum güncellenemedi: {str(e)}")
