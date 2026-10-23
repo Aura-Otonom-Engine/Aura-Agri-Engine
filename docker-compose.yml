@@ -1,0 +1,13 @@
+﻿version: '3.8'
+
+services:
+  agri-engine:
+    build: .
+    container_name: aura_agri_engine
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./aura_agri.db:/app/aura_agri.db
+    environment:
+      - PYTHONUNBUFFERED=1
