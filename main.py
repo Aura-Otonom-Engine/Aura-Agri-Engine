@@ -80,9 +80,8 @@ def tarla_analiz_ve_kaydet(istek: TarlaIstek):
 
         # 4. Sahadaki Fiziksel Vanalara Otonom MQTT Emri Fırlat
         for emir in sulama_emirleri:
-            sektor_adi = emir.get("sektor_id", "BILINMEYEN_SEKTOR")
-            su_miktari = emir.get("onerilen_su_ton", 0.0)
-            # Kritik sektöre vanayı AÇ emri gönderiliyor
+            sektor_adi = emir.get("sektor", "BILINMEYEN_SEKTOR")
+            su_miktari = emir.get("hedef_su_ton", 0.0)
             vana_emri_gonder(sektor_id=sektor_adi, durum="ACIK", su_miktari_ton=su_miktari)
 
         return {
@@ -115,7 +114,6 @@ def vana_emri_guncelle(emir_id: int, istek: EmirDurumGuncelleme):
         conn = sqlite3.connect(DB_YOLU)
         cursor = conn.cursor()
         
-        # Sektör bilgisini çekip fiziksel kapatma emri gönderelim
         cursor.execute("SELECT sektor_id FROM sulama_emirleri WHERE id = ?", (emir_id,))
         kayit = cursor.fetchone()
         
@@ -128,7 +126,6 @@ def vana_emri_guncelle(emir_id: int, istek: EmirDurumGuncelleme):
 
         if kayit:
             sektor_adi = kayit[0]
-            # Fiziksel vanaya KAPALI emri iletiliyor
             vana_emri_gonder(sektor_id=sektor_adi, durum="KAPALI", su_miktari_ton=0.0)
 
         return {"basarili": True, "emir_id": emir_id, "yeni_durum": istek.durum}
