@@ -1,9 +1,11 @@
 import os
 import sqlite3
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from apscheduler.schedulers.background import BackgroundScheduler
 from tarla_analiz import TarlaParselMotoru
 from veritabani import veritabani_baslat, analiz_ve_aksiyon_kaydet, DB_YOLU
 from uydu_servisi import SentinelUyduServisi
@@ -14,10 +16,80 @@ from telegram_servisi import sulama_raporu_gonder
 veritabani_baslat()
 uydu_servisi = SentinelUyduServisi()
 
+# Otonom Tarama Fonksiyonu (Hem API hem Zamanlayıcı tarafından kullanılır)
+def otonom_tarama_gorevi(parsel_adi: str = "Alpha-1 Mısır Sahası", enlem: float = 38.6748, boylam: float = 39.2225, alan_dekar: float = 250.0, grid_boyutu: int = 4):
+    try:
+        print(f"\n⏰ [OTONOM GÖREV TETİKLENDİ] {parsel_adi} için uydu analizi başlıyor...")
+        uydu_raporu = uydu_servisi.canli_bant_verisi_cek(enlem, boylam)
+        
+        rapor = None
+        b04_url = uydu_raporu.get("kirmizi_bant_url")
+        b08_url = uydu_raporu.get("nir_bant_url")
+
+        if b04_url and b08_url:
+            piksel_sonuc = gercek_banttan_ndvi_cikar(b04_url, b08_url, grid_boyutu=grid_boyutu)
+            if piksel_sonuc.get("basarili"):
+                rapor = {
+                    "parsel": parsel_adi,
+                    "koordinat": f"{enlem}, {boylam}",
+                    "alan_dekar": alan_dekar,
+                    "genel_ndvi": piksel_sonuc["genel_ndvi"],
+                    "genel_ndwi": round(piksel_sonuc["genel_ndvi"] * 0.72 - 0.05, 3),
+                    "sektorler": piksel_sonuc["sektorler"],
+                    "mudahale_bekleyen_sektorler": piksel_sonuc["mudahale_bekleyen_sektorler"],
+                    "sulama_sonrasi_mi": False
+                }
+
+        if rapor is None:
+            motor = TarlaParselMotoru(parsel_adi=parsel_adi, enlem=enlem, boylam=boylam, alan_dekar=alan_dekar)
+            rapor = motor.bolgesel_telemetri_tara(grid_boyutu=grid_boyutu, sulama_tamamlandi_mi=False)
+
+        rapor["uydu_meta"] = uydu_raporu
+
+        # Veritabanına kaydet ve kararları al
+        sulama_emirleri = analiz_ve_aksiyon_kaydet(rapor)
+
+        # Sahadaki vanalara MQTT sinyali fırlat
+        for emir in sulama_emirleri:
+            sektor_adi = emir.get("sektor", "BILINMEYEN_SEKTOR")
+            su_miktari = emir.get("hedef_su_ton", 0.0)
+            vana_emri_gonder(sektor_id=sektor_adi, durum="ACIK", su_miktari_ton=su_miktari)
+
+        # Telegram ile telefonuna ilet
+        sulama_raporu_gonder(
+            parsel_adi=rapor["parsel"],
+            genel_ndvi=rapor["genel_ndvi"],
+            emirler=sulama_emirleri
+        )
+        print(f"✅ [OTONOM GÖREV TAMAMLANDI] {len(sulama_emirleri)} sektöre müdahale emri verildi.")
+        return rapor, sulama_emirleri
+    except Exception as e:
+        print(f"❌ [OTONOM GÖREV HATASI]: {str(e)}")
+        return None, []
+
+# Arka Plan Zamanlayıcı Yapılandırması
+scheduler = BackgroundScheduler(daemon=True)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Sunucu başladığında zamanlayıcıyı devreye sok
+    # Her sabah saat 06:00'da otonom tarama yapacak şekilde planlandı:
+    scheduler.add_job(otonom_tarama_gorevi, 'cron', hour=6, minute=0, id="gunluk_tarama")
+    
+    # Test amaçlı: İstersen her 1 saatte bir tarama için alttaki satırı da kullanabilirsin
+    # scheduler.add_job(otonom_tarama_gorevi, 'interval', hours=1, id="saatlik_kontrol")
+    
+    scheduler.start()
+    print("🚀 [APScheduler] Otonom tarama zamanlayıcısı arka planda başlatıldı.")
+    yield
+    scheduler.shutdown()
+    print("🛑 [APScheduler] Zamanlayıcı durduruldu.")
+
 app = FastAPI(
     title="Aura Agri-Engine API",
     description="Otonom Hassas Tarım, Telemetri ve Sulama Karar Motoru",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 MEVCUT_DIZIN = os.path.dirname(os.path.abspath(__file__))
@@ -38,67 +110,20 @@ def dashboard_arayuzu(request: Request):
 
 @app.post("/api/v1/tarla/tara-ve-kaydet")
 def tarla_analiz_ve_kaydet(istek: TarlaIstek):
-    try:
-        # 1. Sentinel-2 Canlı Uydu Meta Verisini Sorgula
-        uydu_raporu = uydu_servisi.canli_bant_verisi_cek(istek.enlem, istek.boylam)
-        
-        rapor = None
-        b04_url = uydu_raporu.get("kirmizi_bant_url")
-        b08_url = uydu_raporu.get("nir_bant_url")
-
-        # 2. Gerçek COG Piksel Taraması
-        if not istek.sulama_sonrasi_mi and b04_url and b08_url:
-            piksel_sonuc = gercek_banttan_ndvi_cikar(b04_url, b08_url, grid_boyutu=istek.grid_boyutu)
-            if piksel_sonuc.get("basarili"):
-                rapor = {
-                    "parsel": istek.parsel_adi,
-                    "koordinat": f"{istek.enlem}, {istek.boylam}",
-                    "alan_dekar": istek.alan_dekar,
-                    "genel_ndvi": piksel_sonuc["genel_ndvi"],
-                    "genel_ndwi": round(piksel_sonuc["genel_ndvi"] * 0.72 - 0.05, 3),
-                    "sektorler": piksel_sonuc["sektorler"],
-                    "mudahale_bekleyen_sektorler": piksel_sonuc["mudahale_bekleyen_sektorler"],
-                    "sulama_sonrasi_mi": False
-                }
-
-        # Fallback veya Sulama Sonrası İyileşme Modeli
-        if rapor is None:
-            motor = TarlaParselMotoru(
-                parsel_adi=istek.parsel_adi,
-                enlem=istek.enlem,
-                boylam=istek.boylam,
-                alan_dekar=istek.alan_dekar
-            )
-            rapor = motor.bolgesel_telemetri_tara(
-                grid_boyutu=istek.grid_boyutu,
-                sulama_tamamlandi_mi=istek.sulama_sonrasi_mi
-            )
-
-        rapor["uydu_meta"] = uydu_raporu
-
-        # 3. Veritabanı ve Karar Motoru
-        sulama_emirleri = analiz_ve_aksiyon_kaydet(rapor)
-
-        # 4. Sahadaki Fiziksel Vanalara Otonom MQTT Emri Fırlat
-        for emir in sulama_emirleri:
-            sektor_adi = emir.get("sektor", "BILINMEYEN_SEKTOR")
-            su_miktari = emir.get("hedef_su_ton", 0.0)
-            vana_emri_gonder(sektor_id=sektor_adi, durum="ACIK", su_miktari_ton=su_miktari)
-
-        # 5. Telegram Bildirimini Fırlat
-        sulama_raporu_gonder(
-            parsel_adi=rapor["parsel"],
-            genel_ndvi=rapor["genel_ndvi"],
-            emirler=sulama_emirleri
-        )
-
-        return {
-            "basarili": True,
-            "analiz_raporu": rapor,
-            "otonom_sulama_emirleri": sulama_emirleri
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"İşlem sırasında hata: {str(e)}")
+    rapor, sulama_emirleri = otonom_tarama_gorevi(
+        parsel_adi=istek.parsel_adi,
+        enlem=istek.enlem,
+        boylam=istek.boylam,
+        alan_dekar=istek.alan_dekar,
+        grid_boyutu=istek.grid_boyutu
+    )
+    if rapor is None:
+        raise HTTPException(status_code=500, detail="Tarama sırasında hata meydana geldi.")
+    return {
+        "basarili": True,
+        "analiz_raporu": rapor,
+        "otonom_sulama_emirleri": sulama_emirleri
+    }
 
 @app.get("/api/v1/sulama-emirleri")
 def sulama_emirlerini_getir():
