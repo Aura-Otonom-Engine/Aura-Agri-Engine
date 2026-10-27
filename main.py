@@ -9,6 +9,7 @@ from veritabani import veritabani_baslat, analiz_ve_aksiyon_kaydet, DB_YOLU
 from uydu_servisi import SentinelUyduServisi
 from piksel_analiz import gercek_banttan_ndvi_cikar
 from mqtt_vana import vana_emri_gonder
+from telegram_servisi import sulama_raporu_gonder
 
 veritabani_baslat()
 uydu_servisi = SentinelUyduServisi()
@@ -83,6 +84,13 @@ def tarla_analiz_ve_kaydet(istek: TarlaIstek):
             sektor_adi = emir.get("sektor", "BILINMEYEN_SEKTOR")
             su_miktari = emir.get("hedef_su_ton", 0.0)
             vana_emri_gonder(sektor_id=sektor_adi, durum="ACIK", su_miktari_ton=su_miktari)
+
+        # 5. Telegram Bildirimini Fırlat
+        sulama_raporu_gonder(
+            parsel_adi=rapor["parsel"],
+            genel_ndvi=rapor["genel_ndvi"],
+            emirler=sulama_emirleri
+        )
 
         return {
             "basarili": True,
