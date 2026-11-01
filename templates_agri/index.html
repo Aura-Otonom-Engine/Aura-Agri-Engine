@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aura Agri-Engine | Otonom Hassas Tarım</title>
+    <title>Aura Agri-Engine | Akıllı Tarla & Sulama Motoru</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        #map { height: 380px; width: 100%; border-radius: 0.75rem; z-index: 10; }
+        #map { height: 420px; width: 100%; border-radius: 1rem; z-index: 10; }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen p-4 md:p-8">
@@ -18,16 +18,18 @@
         <header class="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
             <div>
                 <div class="flex items-center gap-3">
-                    <span class="text-2xl">🛰️</span>
-                    <h1 class="text-2xl font-bold text-emerald-400">Aura Agri-Engine</h1>
+                    <span class="text-3xl">🛰️</span>
+                    <div>
+                        <h1 class="text-2xl font-bold text-emerald-400">Aura Agri-Engine</h1>
+                        <p class="text-xs text-slate-400 mt-0.5">Sentinel-2 Spektral Analiz & Akıllı Sulama Otomasyonu</p>
+                    </div>
                 </div>
-                <p class="text-sm text-slate-400 mt-1">Sentinel-2 Spektral Analiz & Akıllı Sulama Karar Motoru</p>
             </div>
             <div class="mt-4 md:mt-0 flex items-center gap-3">
-                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> MQTT Aktif
+                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Donanım & MQTT Aktif
                 </span>
-                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                     Telegram Entegre
                 </span>
             </div>
@@ -36,16 +38,16 @@
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
             <!-- Sol Panel: Adres Arama & Harita -->
-            <div class="lg:col-span-7 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
+            <div class="lg:col-span-7 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
                 <div>
-                    <h2 class="text-lg font-semibold text-slate-200 mb-2 flex items-center gap-2">
-                        📍 Tarlanı Bul & Seç
+                    <h2 class="text-base font-semibold text-slate-200 mb-2 flex items-center gap-2">
+                        📍 Tarlanı Bul & Haritada İşaretle
                     </h2>
                     
                     <!-- Adres Arama Kutusu -->
                     <div class="flex gap-2 mb-3">
-                        <input id="input-adres" type="text" placeholder="İl, ilçe, köy veya mevki adı yazın..." class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 outline-none focus:border-emerald-500 transition">
-                        <button onclick="adresteAra()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-semibold transition flex items-center gap-1">
+                        <input id="input-adres" type="text" placeholder="İl, ilçe, köy veya mevkii adı yazın..." class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 outline-none focus:border-emerald-500 transition">
+                        <button onclick="adresteAra()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 py-2.5 rounded-xl text-sm font-semibold transition flex items-center gap-1.5">
                             🔍 Bul
                         </button>
                     </div>
@@ -53,75 +55,87 @@
                     <div id="map"></div>
                 </div>
 
-                <!-- Parsel Parametreleri -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 text-xs">
-                    <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                <!-- Tarla Parametreleri -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
                         <span class="text-slate-500 block">Enlem (Lat)</span>
                         <span id="txt-enlem" class="font-mono text-emerald-400 font-bold">38.6750</span>
                     </div>
-                    <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                    <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
                         <span class="text-slate-500 block">Boylam (Lon)</span>
                         <span id="txt-boylam" class="font-mono text-emerald-400 font-bold">39.2126</span>
                     </div>
-                    <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                        <label class="text-slate-500 block">Alan (Dekar)</label>
-                        <input id="input-dekar" type="number" value="50" class="w-full bg-transparent font-mono text-slate-200 outline-none font-bold">
+                    <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                        <label class="text-slate-500 block">Tarla Alanı (Dekar)</label>
+                        <input id="input-dekar" type="number" value="50" onchange="alaniGuncelle()" class="w-full bg-transparent font-mono text-slate-200 outline-none font-bold">
                     </div>
-                    <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                    <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
                         <label class="text-slate-500 block">Tarla Adı</label>
-                        <input id="input-parsel" type="text" value="Bizim Tarla" class="w-full bg-transparent font-sans text-slate-200 outline-none font-bold">
+                        <input id="input-parsel" type="text" value="Ana Tarla" class="w-full bg-transparent font-sans text-slate-200 outline-none font-bold">
                     </div>
                 </div>
 
-                <!-- Kontrol Butonu -->
-                <button id="btn-tara" onclick="tarlayiTara()" class="mt-4 w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 px-4 rounded-xl transition duration-200 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2">
-                    <span>🛰️ 1. Adım: Sentinel-2 ile Tarlayı Analiz Et</span>
+                <button id="btn-tara" onclick="tarlayiTara()" class="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3.5 px-4 rounded-xl transition duration-200 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2">
+                    <span>🛰️ Sentinel-2 ile Tarlayı Analiz Et</span>
                 </button>
             </div>
 
-            <!-- Sağ Panel: Karar, Öneri & Sulama Onayı -->
+            <!-- Sağ Panel: Sadeleştirilmiş Tek Parça Tarla Analiz Kartı -->
             <div class="lg:col-span-5 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
-                <div>
-                    <h2 class="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
-                        📊 Uydu Analiz & Sulama Kararı
-                    </h2>
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-base font-semibold text-slate-200 flex items-center gap-2">
+                            📊 Tarla Sağlık & Sulama Durumu
+                        </h2>
+                        <span id="rozet-durum" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-slate-800 text-slate-400">Bekleniyor</span>
+                    </div>
+
+                    <!-- Çekim Tarihi Bilgilendirme Kartı -->
+                    <div id="bilgi-uydu" class="hidden p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+                        <span>🛰️ <b>Uydu Çekim Tarihi:</b></span>
+                        <span id="txt-uydu-tarih" class="text-emerald-400 font-mono font-bold">--</span>
+                    </div>
                     
-                    <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div class="grid grid-cols-2 gap-3">
                         <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
-                            <span class="text-xs text-slate-500 block mb-1">Ortalama NDVI</span>
-                            <span id="val-ndvi" class="text-2xl font-black text-emerald-400">--</span>
+                            <span class="text-xs text-slate-500 block mb-1">Bitki Gelişimi (NDVI)</span>
+                            <span id="val-ndvi" class="text-3xl font-black text-emerald-400">--</span>
                         </div>
                         <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center">
-                            <span class="text-xs text-slate-500 block mb-1">Ortalama NDWI</span>
-                            <span id="val-ndwi" class="text-2xl font-black text-blue-400">--</span>
+                            <span class="text-xs text-slate-500 block mb-1">Toprak Nemi (NDWI)</span>
+                            <span id="val-ndwi" class="text-3xl font-black text-blue-400">--</span>
                         </div>
                     </div>
 
-                    <!-- Sistem Tavsiyesi ve Kullanıcı Kontrolü -->
-                    <div id="onay-alani" class="hidden mb-4 p-4 rounded-xl bg-slate-950 border border-emerald-500/30">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs text-slate-400 font-semibold uppercase">Sistem Önerisi:</span>
-                            <span id="oneri-ozet" class="text-xs text-amber-400 font-bold">25 Ton Su Verilmeli</span>
-                        </div>
-                        <label class="text-xs text-slate-400 block mb-1">Verilecek Su Miktarını Belirleyin (Ton):</label>
-                        <div class="flex gap-2">
-                            <input id="input-ozel-su" type="number" step="0.5" value="25.0" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 font-mono text-emerald-400 font-bold outline-none">
-                            <button onclick="vanalariAtesle()" class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs transition">
-                                💧 Onayla & Sula
-                            </button>
-                        </div>
+                    <!-- Tek Parça Tarla Durum Özeti -->
+                    <div id="tarla-ozet-kutusu" class="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-2">
+                        <span class="text-slate-400 font-semibold block uppercase tracking-wider text-[11px]">Tarla Genel Durumu</span>
+                        <p id="tarla-durum-metni" class="text-slate-300 leading-relaxed">
+                            Haritadan tarlanızın yerini seçip "Sentinel-2 ile Tarlayı Analiz Et" butonuna basın.
+                        </p>
                     </div>
 
-                    <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Sektörel Durum</h3>
-                    <div id="liste-emirler" class="space-y-2 max-h-52 overflow-y-auto pr-1 text-sm">
-                        <div class="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 text-slate-400 text-xs text-center py-6">
-                            Adresinizi arayın veya haritaya tıklayıp analizi başlatın.
+                    <!-- Sulama ve Tonaj Onayı -->
+                    <div id="onay-alani" class="hidden p-4 rounded-xl bg-slate-950 border border-emerald-500/30 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-slate-400 font-semibold uppercase">Önerilen Su Miktarı:</span>
+                            <span id="oneri-ozet" class="text-xs text-amber-400 font-bold">-- Ton</span>
+                        </div>
+                        
+                        <div>
+                            <label class="text-xs text-slate-400 block mb-1.5">Verilecek Su Tonajı:</label>
+                            <div class="flex gap-2">
+                                <input id="input-ozel-su" type="number" step="1" value="25" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 font-mono text-emerald-400 font-bold outline-none text-base">
+                                <button onclick="vanalariAtesle()" class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/20">
+                                    <span>💧 Vanayı Aç & Sula</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div id="durum-kutu" class="hidden mt-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
-                    ⚡ <b>İşlem Başarılı:</b> Seçtiğiniz tonaj üzerinden vanalara MQTT sinyali iletildi ve Telegram'a raporlandı!
+                <div id="durum-kutu" class="hidden mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
+                    ⚡ <b>Sulama Başlatıldı:</b> Vana açılış sinyali iletildi ve telefonunuza anlık Telegram raporu gönderildi!
                 </div>
             </div>
 
@@ -132,6 +146,7 @@
         let seciliLat = 38.6750;
         let seciliLon = 39.2126;
         let sonAnalizSonucu = null;
+        let tarlaAlaniDairesi = null;
 
         // Haritayı başlat
         const map = L.map('map').setView([seciliLat, seciliLon], 14);
@@ -142,13 +157,35 @@
 
         let marker = L.marker([seciliLat, seciliLon], {draggable: true}).addTo(map);
 
+        function alaniGuncelle() {
+            const dekar = parseFloat(document.getElementById('input-dekar').value) || 50;
+            // 1 Dekar = 1000 m2. Daire yarıçapı r = sqrt(Alan / PI)
+            const alanM2 = dekar * 1000;
+            const yaricapMetre = Math.sqrt(alanM2 / Math.PI);
+
+            if (tarlaAlaniDairesi) {
+                map.removeLayer(tarlaAlaniDairesi);
+            }
+
+            tarlaAlaniDairesi = L.circle([seciliLat, seciliLon], {
+                color: '#10b981',
+                fillColor: '#10b981',
+                fillOpacity: 0.25,
+                weight: 2,
+                radius: yaricapMetre
+            }).addTo(map);
+        }
+
         function konumuGuncelle(lat, lon) {
             seciliLat = parseFloat(lat.toFixed(6));
             seciliLon = parseFloat(lon.toFixed(6));
             document.getElementById('txt-enlem').innerText = seciliLat;
             document.getElementById('txt-boylam').innerText = seciliLon;
             marker.setLatLng([seciliLat, seciliLon]);
+            alaniGuncelle();
         }
+
+        alaniGuncelle();
 
         map.on('click', function(e) {
             konumuGuncelle(e.latlng.lat, e.latlng.lng);
@@ -159,7 +196,7 @@
             konumuGuncelle(pos.lat, pos.lng);
         });
 
-        // Adres Arama Fonksiyonu (Nominatim API)
+        // Adres Arama
         async function adresteAra() {
             const sorgu = document.getElementById('input-adres').value.trim();
             if (!sorgu) return;
@@ -173,14 +210,14 @@
                     map.setView([lat, lon], 15);
                     konumuGuncelle(lat, lon);
                 } else {
-                    alert('Aradığınız konum bulunamadı. Lütfen daha belirgin bir il/ilçe/köy adı yazın.');
+                    alert('Konum bulunamadı. Lütfen daha net bir yer veya köy adı yazın.');
                 }
             } catch (err) {
                 alert('Arama servisine ulaşılamadı: ' + err);
             }
         }
 
-        // 1. Aşama: Sadece Analiz Et & Öneri Çıkar
+        // Tarlayı Tara (Tek Parça Tarla Analizi)
         async function tarlayiTara() {
             const btn = document.getElementById('btn-tara');
             const parselAdi = document.getElementById('input-parsel').value;
@@ -207,39 +244,55 @@
                 const data = await response.json();
                 if (data.basarili) {
                     sonAnalizSonucu = data;
-                    document.getElementById('val-ndvi').innerText = data.analiz_raporu.genel_ndvi;
-                    document.getElementById('val-ndwi').innerText = data.analiz_raporu.genel_ndwi;
+                    const ndvi = data.analiz_raporu.genel_ndvi;
+                    const ndwi = data.analiz_raporu.genel_ndwi;
+                    
+                    document.getElementById('val-ndvi').innerText = ndvi;
+                    document.getElementById('val-ndwi').innerText = ndwi;
 
-                    // Dinamik öneri: Dekar başına ve NDVI düşüklüğüne göre gerçekçi su hesabı
-                    let tabanSu = (alanDekar * 0.5); // Dekar başı 0.5 ton taban
-                    if (data.analiz_raporu.genel_ndvi < 0.45) tabanSu *= 1.5;
-                    const onerilenTon = Math.round(tabanSu * 10) / 10;
+                    // Çekim Tarihini Ekrana Bas
+                    let tarih = data.analiz_raporu.uydu_meta?.tarih || "En Güncel Sentinel-2 Geçişi";
+                    document.getElementById('txt-uydu-tarih').innerText = tarih;
+                    document.getElementById('bilgi-uydu').classList.remove('hidden');
+
+                    // Rozet ve Durum Metni (Tek Parça Özet)
+                    const rozet = document.getElementById('rozet-durum');
+                    const metin = document.getElementById('tarla-durum-metni');
+
+                    let onerilenTon = Math.round(alanDekar * 0.5 * 10) / 10;
+
+                    if (ndvi >= 0.55) {
+                        rozet.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                        rozet.innerText = "Bitki Örtüsü Sağlıklı";
+                        metin.innerHTML = `🌱 <b>Mükemmel Durum:</b> Tarlada klorofil yoğunluğu ve nem seviyesi ideal. Acil sulama ihtiyacı bulunmuyor.`;
+                        if (tarlaAlaniDairesi) tarlaAlaniDairesi.setStyle({color: '#10b981', fillColor: '#10b981'});
+                    } else if (ndvi >= 0.40) {
+                        rozet.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                        rozet.innerText = "Hafif Nem Kaybı";
+                        onerilenTon = Math.round(alanDekar * 0.7 * 10) / 10;
+                        metin.innerHTML = `⚠️ <b>Takip Gerekli:</b> Toprak neminde hafif düşüş tespit edildi. Bitki stresini önlemek için hafif doz sulama tavsiye edilir.`;
+                        if (tarlaAlaniDairesi) tarlaAlaniDairesi.setStyle({color: '#f59e0b', fillColor: '#f59e0b'});
+                    } else {
+                        rozet.className = "text-xs px-2.5 py-1 rounded-full font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20";
+                        rozet.innerText = "Yüksek Kuraklık Riski";
+                        onerilenTon = Math.round(alanDekar * 1.2 * 10) / 10;
+                        metin.innerHTML = `🚨 <b>Kritik Durum:</b> Tarlanın spektral nem değeri düşük seviyede. Kök kuruluğunu önlemek için sulama yapılması önerilir.`;
+                        if (tarlaAlaniDairesi) tarlaAlaniDairesi.setStyle({color: '#ef4444', fillColor: '#ef4444'});
+                    }
 
                     document.getElementById('input-ozel-su').value = onerilenTon;
-                    document.getElementById('oneri-ozet').innerText = `Öneri: ${onerilenTon} Ton`;
+                    document.getElementById('oneri-ozet').innerText = `${onerilenTon} Ton`;
                     document.getElementById('onay-alani').classList.remove('hidden');
-
-                    const liste = document.getElementById('liste-emirler');
-                    liste.innerHTML = '';
-                    data.otonom_sulama_emirleri.forEach(emir => {
-                        liste.innerHTML += `
-                            <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center text-xs">
-                                <span class="font-bold text-amber-400 font-mono">${emir.sektor}</span>
-                                <span class="text-slate-400">Nem Kritik</span>
-                                <span class="text-amber-400 font-semibold">Müdahale Hazır</span>
-                            </div>
-                        `;
-                    });
                 }
             } catch (err) {
                 alert('Hata oluştu: ' + err);
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = `<span>🛰️ 1. Adım: Sentinel-2 ile Tarlayı Analiz Et</span>`;
+                btn.innerHTML = `<span>🛰️ Sentinel-2 ile Tarlayı Analiz Et</span>`;
             }
         }
 
-        // 2. Aşama: Kullanıcının Belirlediği Suyla Vanaları Ateşle
+        // Tek Parça Sulama Emri (Kullanıcı Kontrollü)
         async function vanalariAtesle() {
             if (!sonAnalizSonucu) return;
             const onaylananSu = parseFloat(document.getElementById('input-ozel-su').value) || 20.0;
@@ -252,7 +305,7 @@
                     body: JSON.stringify({
                         parsel_adi: parselAdi,
                         toplam_su_ton: onaylananSu,
-                        emirler: sonAnalizSonucu.otonom_sulama_emirleri,
+                        emirler: [{ sektor: "Ana Vana (Tarla Geneli)", hedef_su_ton: onaylananSu }],
                         genel_ndvi: sonAnalizSonucu.analiz_raporu.genel_ndvi
                     })
                 });
@@ -262,7 +315,7 @@
                     document.getElementById('durum-kutu').classList.remove('hidden');
                 }
             } catch (err) {
-                alert('Vana tetikleme hatası: ' + err);
+                alert('Vana hatası: ' + err);
             }
         }
     </script>
