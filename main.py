@@ -164,3 +164,32 @@ def vana_emri_guncelle(emir_id: int, istek: EmirDurumGuncelleme):
         return {"basarili": True, "emir_id": emir_id, "yeni_durum": istek.durum}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Durum güncellenemedi: {str(e)}")
+
+
+class SulamaOnayIstek(BaseModel):
+    parsel_adi: str
+    toplam_su_ton: float
+    emirler: list
+    genel_ndvi: float
+
+@app.post("/api/v1/sulama/onayla-ve-baslat")
+def sulama_onayla_ve_baslat(istek: SulamaOnayIstek):
+    try:
+        sektor_sayisi = max(len(istek.emirler), 1)
+        sektor_basina_su = round(istek.toplam_su_ton / sektor_sayisi, 2)
+
+        guncel_emirler = []
+        for e in istek.emirler:
+            sektor_adi = e.get("sektor", "Sektör")
+            vana_emri_gonder(sektor_id=sektor_adi, durum="ACIK", su_miktari_ton=sektor_basina_su)
+            guncel_emirler.append({"sektor": sektor_adi, "hedef_su_ton": sektor_basina_su})
+
+        # Telegram'a kullanıcının onayladığı gerçek tonajla rapor gitmesi
+        sulama_raporu_gonder(
+            parsel_adi=istek.parsel_adi,
+            genel_ndvi=istek.genel_ndvi,
+            emirler=guncel_emirler
+        )
+        return {"basarili": True, "verilen_su_ton": istek.toplam_su_ton}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))    
