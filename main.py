@@ -12,6 +12,7 @@ from uydu_servisi import SentinelUyduServisi
 from piksel_analiz import gercek_banttan_ndvi_cikar
 from mqtt_vana import vana_emri_gonder
 from telegram_servisi import sulama_raporu_gonder
+from uydu_servisi import tarla_spektral_analiz_yap
 
 veritabani_baslat()
 uydu_servisi = SentinelUyduServisi()
@@ -96,34 +97,79 @@ MEVCUT_DIZIN = os.path.dirname(os.path.abspath(__file__))
 SABLON_DIZINI = os.path.join(MEVCUT_DIZIN, "templates_agri")
 templates = Jinja2Templates(directory=SABLON_DIZINI)
 
-class TarlaIstek(BaseModel):
-    parsel_adi: str = Field(..., json_schema_extra={"example": "Alpha-1 Mısır Sahası"})
-    enlem: float = Field(..., ge=-90.0, le=90.0, json_schema_extra={"example": 38.6748})
-    boylam: float = Field(..., ge=-180.0, le=180.0, json_schema_extra={"example": 39.2225})
-    alan_dekar: float = Field(..., gt=0, json_schema_extra={"example": 250.0})
-    grid_boyutu: int = Field(default=4, ge=2, le=10, json_schema_extra={"example": 4})
-    sulama_sonrasi_mi: bool = Field(default=False, json_schema_extra={"example": False})
-
-@app.get("/", response_class=HTMLResponse)
-def dashboard_arayuzu(request: Request):
-    return templates.TemplateResponse(request=request, name="index.html")
+class TarlaIstekModel(BaseModel):
+    parsel_adi: str
+    enlem: float
+    boylam: float
+    alan_dekar: float
+    urun_tipi: str = "Bugday/Misir"
+    grid_boyutu: int = 4
+    sulama_sonrasi_mi: bool = False
 
 @app.post("/api/v1/tarla/tara-ve-kaydet")
-def tarla_analiz_ve_kaydet(istek: TarlaIstek):
-    rapor, sulama_emirleri = otonom_tarama_gorevi(
-        parsel_adi=istek.parsel_adi,
-        enlem=istek.enlem,
-        boylam=istek.boylam,
-        alan_dekar=istek.alan_dekar,
-        grid_boyutu=istek.grid_boyutu
-    )
-    if rapor is None:
-        raise HTTPException(status_code=500, detail="Tarama sırasında hata meydana geldi.")
+async def tarlayi_tara_ve_kaydet(istek: TarlaIstekModel):
+    # 1. Sentinel-2 spektral analizi (Mevcut fonksiyonun)
+    analiz = tarla_spektral_analiz_yap(istek.enlem, istek.boylam, istek.alan_dekar, istek.grid_boyutu)
+    
+    # 2. Canlı hava durumu ve yağış kontrolü
+    hava_bilgisi = await hava_durumu_ve_yagis_kontrol(istek.enlem, istek.boylam)
+    son_yagis = hava_bilgisi.get("son_48s_yagis_mm", 0.0)
+    
+    ndvi = analiz["genel_ndvi"]
+    ndwi = analiz["genel_ndwi"]
+    
+    # Akıllı Karar & Reçete Üretimi
+    onerilen_su = round(istek.alan_dekar * 0.5, 1)
+    recete_mesaji = ""
+    durum_tipi = "normal"
+    
+    if son_yagis > 3.0:
+        onerilen_su = 0.0
+        durum_tipi = "yagis"
+        recete_mesaji = f"🌧️ Son 48 saatte {son_yagis} mm yağış alındı. Toprak neme doyduğu için sulama otomatik askıya alındı."
+    elif ndvi < 0.40 and ndwi < 0.20:
+        onerilen_su = round(istek.alan_dekar * 1.2, 1)
+        durum_tipi = "kurak"
+        recete_mesaji = f"🚨 Kritik Kuraklık: Bitki kök bölgesinde su stresi tespit edildi. Acil {onerilen_su} ton sulama önerilir."
+    elif ndvi < 0.45 and ndwi >= 0.25:
+        onerilen_su = round(istek.alan_dekar * 0.3, 1)
+        durum_tipi = "gubre"
+        recete_mesaji = f"🧪 Azot/Gübre İhtiyacı: Toprak nemi yeterli (%{ndwi*100:.0f}) ancak klorofil seviyesi düşük. Su yerine 1 dekar için taban gübresi (Azot) takviyesi önerilir."
+    else:
+        recete_mesaji = f"🌱 Bitki örtüsü ve toprak nemi dengeli seyrediyor. Ekstra müdahaleye gerek yok."
+
     return {
         "basarili": True,
-        "analiz_raporu": rapor,
-        "otonom_sulama_emirleri": sulama_emirleri
+        "analiz_raporu": analiz,
+        "akilli_analiz": {
+            "son_yagis_mm": son_yagis,
+            "durum_tipi": durum_tipi,
+            "onerilen_su_ton": onerilen_su,
+            "recete_mesaji": recete_mesaji,
+            "urun_tipi": istek.urun_tipi
+        },
+        "otonom_sulama_emirleri": [{"sektor": f"Ana Vana ({istek.urun_tipi})", "hedef_su_ton": onerilen_su}] if onerilen_su > 0 else []
     }
+
+
+import httpx
+
+# (Mevcut kodların üzerine / içine eklenecek akıllı analiz fonksiyonu)
+async def hava_durumu_ve_yagis_kontrol(enlem: float, boylam: float):
+    """Open-Meteo API üzerinden son 48 saatlik yağış ve hava durumunu çeker."""
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={enlem}&longitude={enlem}&current=temperature_2m,relative_humidity_2m&past_days=2&hourly=precipitation"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, timeout=5.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                # Son 48 saatin toplam yağışını hesapla
+                hourly_precip = data.get("hourly", {}).get("precipitation", [])
+                toplam_yagis = sum(hourly_precip[-48:]) if hourly_precip else 0.0
+                return {"basarili": True, "son_48s_yagis_mm": toplam_yagis}
+    except Exception:
+        pass
+    return {"basarili": False, "son_48s_yagis_mm": 0.0}
 
 @app.get("/api/v1/sulama-emirleri")
 def sulama_emirlerini_getir():
