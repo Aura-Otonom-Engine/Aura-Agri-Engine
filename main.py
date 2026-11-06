@@ -6,6 +6,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from apscheduler.schedulers.background import BackgroundScheduler
+import httpx
+
 from tarla_analiz import TarlaParselMotoru
 from veritabani import veritabani_baslat, analiz_ve_aksiyon_kaydet, DB_YOLU
 from uydu_servisi import SentinelUyduServisi
@@ -16,6 +18,22 @@ from uydu_servisi import tarla_spektral_analiz_yap
 
 veritabani_baslat()
 uydu_servisi = SentinelUyduServisi()
+
+# Arka Plan Hava Durumu ve Yağış Kontrolü
+async def hava_durumu_ve_yagis_kontrol(enlem: float, boylam: float):
+    """Open-Meteo API üzerinden son 48 saatlik yağış ve hava durumunu çeker."""
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={enlem}&longitude={boylam}&current=temperature_2m,relative_humidity_2m&past_days=2&hourly=precipitation"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, timeout=5.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                hourly_precip = data.get("hourly", {}).get("precipitation", [])
+                toplam_yagis = sum(hourly_precip[-48:]) if hourly_precip else 0.0
+                return {"basarili": True, "son_48s_yagis_mm": toplam_yagis}
+    except Exception:
+        pass
+    return {"basarili": False, "son_48s_yagis_mm": 0.0}
 
 # Otonom Tarama Fonksiyonu (Hem API hem Zamanlayıcı tarafından kullanılır)
 def otonom_tarama_gorevi(parsel_adi: str = "Alpha-1 Mısır Sahası", enlem: float = 38.6748, boylam: float = 39.2225, alan_dekar: float = 250.0, grid_boyutu: int = 4):
@@ -35,7 +53,7 @@ def otonom_tarama_gorevi(parsel_adi: str = "Alpha-1 Mısır Sahası", enlem: flo
                     "koordinat": f"{enlem}, {boylam}",
                     "alan_dekar": alan_dekar,
                     "genel_ndvi": piksel_sonuc["genel_ndvi"],
-                    "genel_ndwi": round(piksel_sonuc["genel_ndvi"] * 0.72 - 0.05, 3),
+                    "genel_ndwi": round(piksel_sonuc["genel_ndvi"] * 0.72, 3),
                     "sektorler": piksel_sonuc["sektorler"],
                     "mudahale_bekleyen_sektorler": piksel_sonuc["mudahale_bekleyen_sektorler"],
                     "sulama_sonrasi_mi": False
@@ -47,16 +65,13 @@ def otonom_tarama_gorevi(parsel_adi: str = "Alpha-1 Mısır Sahası", enlem: flo
 
         rapor["uydu_meta"] = uydu_raporu
 
-        # Veritabanına kaydet ve kararları al
         sulama_emirleri = analiz_ve_aksiyon_kaydet(rapor)
 
-        # Sahadaki vanalara MQTT sinyali fırlat
         for emir in sulama_emirleri:
             sektor_adi = emir.get("sektor", "BILINMEYEN_SEKTOR")
             su_miktari = emir.get("hedef_su_ton", 0.0)
             vana_emri_gonder(sektor_id=sektor_adi, durum="ACIK", su_miktari_ton=su_miktari)
 
-        # Telegram ile telefonuna ilet
         sulama_raporu_gonder(
             parsel_adi=rapor["parsel"],
             genel_ndvi=rapor["genel_ndvi"],
@@ -73,13 +88,7 @@ scheduler = BackgroundScheduler(daemon=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Sunucu başladığında zamanlayıcıyı devreye sok
-    # Her sabah saat 06:00'da otonom tarama yapacak şekilde planlandı:
     scheduler.add_job(otonom_tarama_gorevi, 'cron', hour=6, minute=0, id="gunluk_tarama")
-    
-    # Test amaçlı: İstersen her 1 saatte bir tarama için alttaki satırı da kullanabilirsin
-    # scheduler.add_job(otonom_tarama_gorevi, 'interval', hours=1, id="saatlik_kontrol")
-    
     scheduler.start()
     print("🚀 [APScheduler] Otonom tarama zamanlayıcısı arka planda başlatıldı.")
     yield
@@ -95,7 +104,15 @@ app = FastAPI(
 
 MEVCUT_DIZIN = os.path.dirname(os.path.abspath(__file__))
 SABLON_DIZINI = os.path.join(MEVCUT_DIZIN, "templates_agri")
-templates = Jinja2Templates(directory=SABLON_DIZINI)
+
+# Kök Dizin Rotası (Tarayıcının doğrudan index.html açmasını sağlar)
+@app.get("/", response_class=HTMLResponse)
+async def ana_sayfa():
+    dosya_yolu = os.path.join(SABLON_DIZINI, "index.html")
+    if os.path.exists(dosya_yolu):
+        with open(dosya_yolu, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h3>Aura Agri-Engine Çalışıyor ancak index.html bulunamadı!</h3>"
 
 class TarlaIstekModel(BaseModel):
     parsel_adi: str
@@ -108,17 +125,14 @@ class TarlaIstekModel(BaseModel):
 
 @app.post("/api/v1/tarla/tara-ve-kaydet")
 async def tarlayi_tara_ve_kaydet(istek: TarlaIstekModel):
-    # 1. Sentinel-2 spektral analizi (Mevcut fonksiyonun)
     analiz = tarla_spektral_analiz_yap(istek.enlem, istek.boylam, istek.alan_dekar, istek.grid_boyutu)
     
-    # 2. Canlı hava durumu ve yağış kontrolü
     hava_bilgisi = await hava_durumu_ve_yagis_kontrol(istek.enlem, istek.boylam)
     son_yagis = hava_bilgisi.get("son_48s_yagis_mm", 0.0)
     
     ndvi = analiz["genel_ndvi"]
     ndwi = analiz["genel_ndwi"]
     
-    # Akıllı Karar & Reçete Üretimi
     onerilen_su = round(istek.alan_dekar * 0.5, 1)
     recete_mesaji = ""
     durum_tipi = "normal"
@@ -150,26 +164,6 @@ async def tarlayi_tara_ve_kaydet(istek: TarlaIstekModel):
         },
         "otonom_sulama_emirleri": [{"sektor": f"Ana Vana ({istek.urun_tipi})", "hedef_su_ton": onerilen_su}] if onerilen_su > 0 else []
     }
-
-
-import httpx
-
-# (Mevcut kodların üzerine / içine eklenecek akıllı analiz fonksiyonu)
-async def hava_durumu_ve_yagis_kontrol(enlem: float, boylam: float):
-    """Open-Meteo API üzerinden son 48 saatlik yağış ve hava durumunu çeker."""
-    try:
-        url = f"https://api.open-meteo.com/v1/forecast?latitude={enlem}&longitude={enlem}&current=temperature_2m,relative_humidity_2m&past_days=2&hourly=precipitation"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=5.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                # Son 48 saatin toplam yağışını hesapla
-                hourly_precip = data.get("hourly", {}).get("precipitation", [])
-                toplam_yagis = sum(hourly_precip[-48:]) if hourly_precip else 0.0
-                return {"basarili": True, "son_48s_yagis_mm": toplam_yagis}
-    except Exception:
-        pass
-    return {"basarili": False, "son_48s_yagis_mm": 0.0}
 
 @app.get("/api/v1/sulama-emirleri")
 def sulama_emirlerini_getir():
@@ -211,7 +205,6 @@ def vana_emri_guncelle(emir_id: int, istek: EmirDurumGuncelleme):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Durum güncellenemedi: {str(e)}")
 
-
 class SulamaOnayIstek(BaseModel):
     parsel_adi: str
     toplam_su_ton: float
@@ -230,7 +223,6 @@ def sulama_onayla_ve_baslat(istek: SulamaOnayIstek):
             vana_emri_gonder(sektor_id=sektor_adi, durum="ACIK", su_miktari_ton=sektor_basina_su)
             guncel_emirler.append({"sektor": sektor_adi, "hedef_su_ton": sektor_basina_su})
 
-        # Telegram'a kullanıcının onayladığı gerçek tonajla rapor gitmesi
         sulama_raporu_gonder(
             parsel_adi=istek.parsel_adi,
             genel_ndvi=istek.genel_ndvi,
@@ -238,4 +230,4 @@ def sulama_onayla_ve_baslat(istek: SulamaOnayIstek):
         )
         return {"basarili": True, "verilen_su_ton": istek.toplam_su_ton}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))    
+        raise HTTPException(status_code=500, detail=str(e))
